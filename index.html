@@ -1,0 +1,518 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f4f5f7"><meta name="apple-mobile-web-app-status-bar-style" content="default"><title>SketchLab Studio</title>
+<style>
+:root{--bg:#f4f5f7;--fg:#1d2330;--bar:#fff;--ac:#2f6fed;--bd:#d5d9e0;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#171a21;--fg:#e8ebf2;--bar:#22262f;--ac:#6a9bff;--bd:#383e4a}}
+:root[data-theme=dark]{--bg:#171a21;--fg:#e8ebf2;--bar:#22262f;--ac:#6a9bff;--bd:#383e4a}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px -apple-system,system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#app{height:100%;height:100dvh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}
+.bar{display:flex;gap:6px;padding:6px;overflow-x:auto;background:var(--bar);flex:none}
+button{flex:none;min-height:40px;padding:0 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bar);color:var(--fg);font:inherit}
+button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+#cv{flex:1;position:relative;min-height:0;min-width:0;overflow:hidden}
+canvas{display:block;width:100%;height:100%;touch-action:none;-webkit-tap-highlight-color:transparent}
+#tag{position:absolute;left:8px;top:8px;padding:2px 8px;border-radius:8px;background:var(--bar);font-size:12px}
+#hint{padding:6px 10px;background:var(--bar);font-size:13px;flex:none;min-height:18px}
+
+button{white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}.bar::-webkit-scrollbar{height:4px}.bar::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}#hint{line-height:1.35;max-height:3.5em;overflow:auto}
+</style></head><body>
+<div id="app"><div id="loaderr" style="padding:16px;background:#fff4d6;color:#5c4200;font:14px system-ui;display:block">Loading SketchLab Studio…</div><div class="bar" id="tools"></div><div id="cv"><span id="tag"></span></div><div id="hint"></div><div class="bar" id="acts"></div></div>
+<script>
+window.bootSketchLab=function(){
+ try{
+
+const T=THREE,cv=document.getElementById('cv'),$=id=>document.getElementById(id);
+const scene=new T.Scene(),cam=new T.PerspectiveCamera(45,1,.1,500),ren=new T.WebGLRenderer({antialias:true});
+ren.setPixelRatio(Math.min(devicePixelRatio,2));cv.prepend(ren.domElement);const el=ren.domElement;
+scene.add(new T.AmbientLight(0xffffff,.8));const dl=new T.DirectionalLight(0xffffff,.55);dl.position.set(3,8,5);scene.add(dl);
+dl.castShadow=true;dl.shadow.mapSize.set(2048,2048);Object.assign(dl.shadow.camera,{left:-20,right:20,top:20,bottom:-20,near:1,far:60});ren.shadowMap.enabled=false;
+const gnd=new T.Mesh(new T.PlaneGeometry(60,60),new T.ShadowMaterial({opacity:.25}));gnd.rotation.x=-Math.PI/2;gnd.position.y=-.002;gnd.receiveShadow=true;gnd.visible=false;scene.add(gnd);
+let shad=0,sty=0;
+const gr=new T.GridHelper(40,40,0x8a8f99,0x8a8f99);gr.material.transparent=true;gr.material.opacity=.3;scene.add(gr);
+[[0xe04848,[-20,0,0,20,0,0]],[0x3a7be0,[0,0,-20,0,0,20]],[0x3ab05a,[0,0,0,0,20,0]]].forEach(([c,p])=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));scene.add(new T.LineSegments(g,new T.LineBasicMaterial({color:c})))});
+let V=[],E=new Set(),F=[],gid=0,tool='orbit',axis=-1,last=null,rc1=null,sel=new Set(),U=[],R=[],learn=1,chal=0,th=.8,ph=1.05,rad=14,tg=new T.Vector3(),mesh,tf=[],ovl=[],dirty=1,base=null,dr=null,moved=0,pg=null;
+const nd=new T.Vector2(),rc=new T.Raycaster(),Ps=new Map();
+let snapStep=.25,unitName='m';const key=(a,b)=>a<b?a+','+b:b+','+a,vec=i=>new T.Vector3(...V[i]),g4=x=>Math.round(x/snapStep)*snapStep,pr=k=>k.split(',').map(Number),dd=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+const snap=()=>JSON.stringify({V,E:[...E],F});
+function load(s){const o=JSON.parse(s);V=o.V;E=new Set(o.E);F=o.F;gid=Math.max(0,...F.map(f=>f.g))}
+function mark(s){U.push(s||snap());R=[];if(U.length>60)U.shift()}
+function undo(){if(!U.length)return;R.push(snap());load(U.pop());sel.clear();rebuild()}
+function redo(){if(!R.length)return;U.push(snap());load(R.pop());sel.clear();rebuild()}
+function addV(p){let i=V.findIndex(q=>dd(q,p)<1e-4);if(i<0){V.push(p.map(x=>+x.toFixed(5)));i=V.length-1}return i}
+const addE=(a,b)=>{if(a!=b)E.add(key(a,b))},bdry=f=>f.v.forEach((a,i)=>addE(a,f.v[(i+1)%f.v.length]));
+const fbs=()=>{const s=new Set();F.forEach(f=>f.v.forEach((a,i)=>s.add(key(a,f.v[(i+1)%f.v.length]))));return s};
+function nrm(v){const n=new T.Vector3();for(let i=0;i<v.length;i++){const a=V[v[i]],b=V[v[(i+1)%v.length]];n.x+=(a[1]-b[1])*(a[2]+b[2]);n.y+=(a[2]-b[2])*(a[0]+b[0]);n.z+=(a[0]-b[0])*(a[1]+b[1])}return n.normalize()}
+function splitEdge(a,b,m){E.delete(key(a,b));addE(a,m);addE(m,b);F.forEach(f=>{const v=f.v,n=v.length;for(let i=0;i<n;i++)if((v[i]==a&&v[(i+1)%n]==b)||(v[i]==b&&v[(i+1)%n]==a)){v.splice(i+1,0,m);break}})}
+function drawEdge(a,b){
+ if(a==b||E.has(key(a,b)))return;addE(a,b);
+ for(const f of F){const v=f.v,i=v.indexOf(a),j=v.indexOf(b);if(i>=0&&j>=0){const n=v.length,p1=[],p2=[];
+  for(let k=i;;k=(k+1)%n){p1.push(v[k]);if(k==j)break}
+  for(let k=j;;k=(k+1)%n){p2.push(v[k]);if(k==i)break}
+  if(p1.length>2&&p2.length>2){f.v=p1;F.push({v:p2,g:f.g});return}}}
+ const adj={};E.forEach(k=>{const[x,y]=pr(k);(adj[x]??=[]).push(y);(adj[y]??=[]).push(x)});
+ const prev={[a]:-1},q=[a];
+ while(q.length){const u=q.shift();if(u==b)break;for(const w of adj[u]||[]){if(u==a&&w==b)continue;if(!(w in prev)){prev[w]=u;q.push(w)}}}
+ if(!(b in prev))return;
+ const path=[];for(let u=b;u!=-1;u=prev[u])path.push(u);
+ if(path.length<3)return;const n=nrm(path);if(n.lengthSq()<.5)return;
+ const p0=vec(path[0]);if(path.some(i=>Math.abs(vec(i).sub(p0).dot(n))>1e-3))return;
+ const s=[...path].sort().join();if(F.some(f=>[...f.v].sort().join()==s))return;
+ F.push({v:path,g:0})}
+function rectC(p,q,k){const[i,j]=[0,1,2].filter(x=>x!=k),a=[...p],b=[...p],c=[...q],d=[...p];b[i]=q[i];d[j]=q[j];c[k]=p[k];return[a,b,c,d]}
+function drawRect(p,q,k){const c=rectC(p,q,k);if(dd(c[0],c[1])<.01||dd(c[0],c[3])<.01)return;
+ const ids=c.map(addV);ids.forEach((x,n)=>addE(x,ids[(n+1)%4]));
+ if(!F.some(f=>[...f.v].sort().join()==[...ids].sort().join()))F.push({v:ids,g:0})}
+function extrude(fi,d){const f=F[fi],v=f.v,L=v.length,n=nrm(v);
+ const solid=v.every((a,i)=>{const b=v[(i+1)%L];return F.some((o,oi)=>oi!=fi&&o.v.some((x,k)=>{const y=o.v[(k+1)%o.v.length];return x==a&&y==b||x==b&&y==a}))});
+ const nv=v.map(i=>addV(V[i].map((c,k)=>c+n.getComponent(k)*d)));
+ v.forEach((a,i)=>{const j=(i+1)%L;F.push({v:[a,v[j],nv[j],nv[i]],g:f.g})});
+ F.push({v:nv,g:f.g});if(solid)F.splice(fi,1);F.forEach(bdry)}
+function dup(ids,off,rep){const fs=fbs(),loose=[...E].filter(k=>!fs.has(k)),m={},id=++gid;
+ const nf=ids.map(fi=>({v:F[fi].v.map(i=>m[i]??=V.push(V[i].map((c,k)=>c+off[k]))-1),g:id}));
+ if(rep)ids.forEach((fi,n)=>F[fi]=nf[n]);else{sel=new Set(nf.map((_,n)=>F.length+n));F.push(...nf)}
+ E=new Set(loose);F.forEach(bdry)}
+function offs(fi,d){const f=F[fi],v=f.v,L=v.length,n=nrm(v);
+ const nv=v.map((_,i)=>{const a=vec(v[(i+L-1)%L]),b=vec(v[i]),c=vec(v[(i+1)%L]),m1=n.clone().cross(b.clone().sub(a).normalize()),m2=n.clone().cross(c.clone().sub(b).normalize()),k=d/((1+m1.dot(m2))||1);return addV(b.addScaledVector(m1.add(m2),k).toArray())});
+ F[fi]={v:nv,g:f.g,c:f.c};v.forEach((a,i)=>{const j=(i+1)%L;F.push({v:[a,v[j],nv[j],nv[i]],g:f.g})});F.forEach(bdry)}
+function dxfImport(t){const L=t.split(/\r?\n/),en=[];let c=null;
+ for(let i=0;i+1<L.length;i+=2){const k=+L[i].trim(),v=L[i+1].trim();if(k==0){c=['LINE','3DFACE','LWPOLYLINE'].includes(v)?{t:v,n:[]}:null;if(c)en.push(c)}else if(c)c.n.push([k,v])}
+ const g=(e,k)=>e.n.filter(a=>a[0]==k).map(a=>+a[1]),P=[];
+ en.forEach(e=>{if(e.t=='LINE')e.p=[[g(e,10)[0],g(e,20)[0],g(e,30)[0]||0],[g(e,11)[0],g(e,21)[0],g(e,31)[0]||0]];
+  else if(e.t=='3DFACE')e.p=[0,1,2,3].map(k=>[g(e,10+k)[0],g(e,20+k)[0],g(e,30+k)[0]||0]);
+  else{const x=g(e,10),y=g(e,20),z=g(e,38)[0]||0;e.p=x.map((a,i)=>[a,y[i],z]);e.cl=(g(e,70)[0]||0)&1}
+  e.p=e.p.filter(p=>p.every(Number.isFinite));P.push(...e.p)});
+ if(!P.length)return tip('No LINE, 3DFACE or LWPOLYLINE found');
+ const mn=[0,1,2].map(k=>Math.min(...P.map(p=>p[k]))),mx=[0,1,2].map(k=>Math.max(...P.map(p=>p[k]))),s=10/Math.max(...mx.map((m,k)=>m-mn[k]),1e-6);
+ const tr=p=>[(p[0]-(mn[0]+mx[0])/2)*s,(p[2]-mn[2])*s,-(p[1]-(mn[1]+mx[1])/2)*s];
+ mark();
+ en.forEach(e=>{const ids=e.p.map(p=>addV(tr(p)));
+  if(e.t=='LINE')addE(ids[0],ids[1]);
+  else if(e.t=='3DFACE'){const u=[...new Set(ids)];if(u.length>2){const f={v:u,g:0};F.push(f);bdry(f)}}
+  else{for(let i=0;i<ids.length-1;i++)drawEdge(ids[i],ids[i+1]);if(e.cl&&ids.length>2)drawEdge(ids[ids.length-1],ids[0])}});
+ rebuild();tip('Imported '+en.length+' entities')}
+
+// Architectural component primitives. Geometry remains editable in the native V/E/F model.
+function makeBox(x,y,z,w,h,d,group=0,color=null){
+ if([x,y,z,w,h,d].some(n=>!Number.isFinite(n))||w<=0||h<=0||d<=0)return false;
+ const pts=[[x,y,z],[x+w,y,z],[x+w,y+h,z],[x,y+h,z],[x,y,z+d],[x+w,y,z+d],[x+w,y+h,z+d],[x,y+h,z+d]];
+ const ids=pts.map(addV),faces=[[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
+ faces.forEach(a=>{const f={v:a.map(i=>ids[i]),g:group};if(color)f.c=color;F.push(f);bdry(f)});return true;
+}
+function componentBox(kind){
+ const defaults={box:[4,3,4],wall:[4,3,.2],slab:[4,.2,4],column:[.4,3,.4]};
+ const d=defaults[kind]||defaults.box;
+ const ask=(label,val)=>{const n=Number(prompt(label,String(val)));return Number.isFinite(n)&&n>0?n:null};
+ const w=ask('Width / length ('+unitName+')',d[0]);if(w===null)return;
+ const h=ask(kind==='slab'?'Slab thickness ('+unitName+')':'Height ('+unitName+')',d[1]);if(h===null)return;
+ const dep=ask('Depth / thickness ('+unitName+')',d[2]);if(dep===null)return;
+ mark();const x=V.length?Math.max(...V.map(p=>p[0]))+1:0,z=V.length?Math.max(...V.map(p=>p[2]))+1:0;
+ makeBox(x,kind==='slab'?0:0,z,w,h,dep);rebuild();tip(kind[0].toUpperCase()+kind.slice(1)+' created');
+}
+function addColumn(){const r=Number(prompt('Column radius ('+unitName+')','0.2')),h=Number(prompt('Column height ('+unitName+')','3')),sides=12;if(!(r>0&&h>0))return;
+ mark();const x=V.length?Math.max(...V.map(p=>p[0]))+1:0,z=V.length?Math.max(...V.map(p=>p[2]))+1:0,lo=[],hi=[];
+ for(let i=0;i<sides;i++){const a=i*2*Math.PI/sides;lo.push(addV([x+Math.cos(a)*r,0,z+Math.sin(a)*r]));hi.push(addV([x+Math.cos(a)*r,h,z+Math.sin(a)*r]))}
+ const bot={v:[...lo].reverse(),g:0},top={v:hi,g:0};F.push(bot,top);bdry(bot);bdry(top);for(let i=0;i<sides;i++){const j=(i+1)%sides,f={v:[lo[i],lo[j],hi[j],hi[i]],g:0};F.push(f);bdry(f)}rebuild();tip('Column created');
+}
+function addStairs(){const n=Number(prompt('Number of steps','8')),run=Number(prompt('Total run ('+unitName+')','3.2')),rise=Number(prompt('Total rise ('+unitName+')','1.2')),width=Number(prompt('Stair width ('+unitName+')','1.2'));if(!Number.isInteger(n)||n<1||n>40||!(run>0&&rise>0&&width>0))return;
+ mark();const x=V.length?Math.max(...V.map(p=>p[0]))+1:0,z=V.length?Math.max(...V.map(p=>p[2]))+1:0;for(let i=0;i<n;i++)makeBox(x+i*run/n,0,z,width,(i+1)*rise/n,run/n,0);rebuild();tip(n+' stair steps created');
+}
+function addGableRoof(){const w=Number(prompt('Roof span ('+unitName+')','4')),h=Number(prompt('Roof rise ('+unitName+')','1.2')),d=Number(prompt('Roof length ('+unitName+')','5'));if(!(w>0&&h>0&&d>0))return;
+ mark();const x=V.length?Math.max(...V.map(p=>p[0]))+1:0,z=V.length?Math.max(...V.map(p=>p[2]))+1:0;
+ const p=[[x,0,z],[x+w,0,z],[x+w/2,h,z],[x,0,z+d],[x+w,0,z+d],[x+w/2,h,z+d]],ids=p.map(addV);
+ [[0,1,2],[3,5,4],[0,3,4,1],[0,2,5,3],[2,1,4,5]].forEach(a=>{const f={v:a.map(i=>ids[i]),g:0};F.push(f);bdry(f)});rebuild();tip('Gable roof created');
+}
+function moveSelectedExact(){if(!sel.size)return tip('Select faces first');const ask=(a)=>{const v=Number(prompt('Move '+a+' ('+unitName+')','0'));return Number.isFinite(v)?v:null};const x=ask('X');if(x===null)return;const y=ask('Y');if(y===null)return;const z=ask('Z');if(z===null)return;mark();vsel().forEach(i=>V[i]=V[i].map((c,k)=>c+[x,y,z][k]));rebuild();}
+function projectJSON(){return JSON.stringify({format:'SketchLabProject',version:2,units:unitName,snapStep,model:JSON.parse(snap()),camera:{th,ph,rad,target:tg.toArray()}},null,2)}
+function exportProject(){saveFile('sketchlab-project.json',projectJSON())}
+function importProjectFile(file){const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);const model=o.model||o;if(!Array.isArray(model.V)||!Array.isArray(model.E)||!Array.isArray(model.F))throw Error('Invalid project');mark();load(JSON.stringify(model));sel.clear();unitName=o.units||unitName;snapStep=Number(o.snapStep)||snapStep;if(o.camera){th=o.camera.th;ph=o.camera.ph;rad=o.camera.rad;if(o.camera.target)tg.fromArray(o.camera.target)}rebuild();dirty=1;tip('Project imported')}catch(e){tip('Invalid SketchLab project')}};r.readAsText(file)}
+function exportDXF(){if(!V.length&&!E.size&&!F.length)return tip('Nothing to export');let s='0\nSECTION\n2\nENTITIES\n';const line=(a,b)=>{s+='0\nLINE\n8\n0\n10\n'+V[a][0]+'\n20\n'+V[a][2]+'\n30\n'+V[a][1]+'\n11\n'+V[b][0]+'\n21\n'+V[b][2]+'\n31\n'+V[b][1]+'\n'};E.forEach(k=>{const [a,b]=pr(k);line(a,b)});F.forEach(f=>{const ids=f.v.slice(0,4);while(ids.length<4)ids.push(ids[ids.length-1]);s+='0\n3DFACE\n8\n0\n';ids.forEach((id,i)=>{s+=(10+i)+'\n'+V[id][0]+'\n'+(20+i)+'\n'+V[id][2]+'\n'+(30+i)+'\n'+V[id][1]+'\n'})});s+='0\nENDSEC\n0\nEOF\n';saveFile('sketchlab-model.dxf',s)}
+
+const vsel=()=>[...new Set([...sel].flatMap(fi=>F[fi].v))];
+function cen(){const c=new T.Vector3(),a=vsel();a.forEach(i=>c.add(vec(i)));return c.divideScalar(a.length||1)}
+function xf(fn){if(!sel.size)return;mark();const c=cen();vsel().forEach(i=>{const p=vec(i).sub(c);fn(p);V[i]=p.add(c).toArray()});rebuild()}
+function goal(){if(F.length<6)return 0;const mn=[9e9,9e9,9e9],mx=[-9e9,-9e9,-9e9];F.forEach(f=>f.v.forEach(i=>V[i].forEach((c,k)=>{mn[k]=Math.min(mn[k],c);mx[k]=Math.max(mx[k],c)})));const d=mx.map((m,k)=>m-mn[k]).sort((a,b)=>a-b);return [2,3,4].every((x,i)=>Math.abs(d[i]-x)<.05)}
+const H={orbit:'Drag to orbit. Two fingers: pinch to zoom, drag to pan.',select:'Tap faces to select or deselect. Tap empty space to clear.',line:'Tap points to draw. Tap the last point again to finish. Snaps to endpoints, midpoints and grid.',rect:'Tap two corners, on the ground or on a face.',push:'Drag a face to extrude it. Release to confirm.',move:'Select faces, then drag. Axis button locks X, Y or Z.',offset:'Drag a face sideways to inset it (right = inward). Then Push/Pull the inner face.',tape:'Tap two points to measure the distance.',paint:'Pick a color at the end of the top bar, then tap faces to paint.'};
+const S=[['Pick Rect and tap two corners on the grid.',()=>F.length>=1],['Pick Push/Pull and drag the face upward.',()=>F.length>=6],['Use Line on the top face, midpoint to midpoint, to split it.',()=>F.length>=7],['Select a face, tap Group, then Move it.',()=>F.some(f=>f.g)],['Tutorial done. Tap Goal for a challenge.',()=>0]];
+function hint(){let t=H[tool];if(learn){const s=S.find(s=>!s[1]());t=(chal?(goal()?'✔ Goal reached: a 4 × 3 × 2 box!':'Goal: model a box measuring 4 × 3 × 2 units.'):s[0])+'  ·  V'+V.length+' E'+E.size+' F'+F.length}$('hint').textContent=t}
+function addO(a,c,pts){const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(a,3));const o=pts?new T.Points(g,new T.PointsMaterial({color:c,size:9,sizeAttenuation:false})):new T.LineSegments(g,new T.LineBasicMaterial({color:c}));scene.add(o);ovl.push(o)}
+function rebuild(){
+ [mesh,...ovl].forEach(o=>{if(o){scene.remove(o);o.geometry.dispose()}});ovl=[];
+ const P=[],C=[];tf=[];
+ F.forEach((f,fi)=>{if(window.__sketchHiddenGroups&&window.__sketchHiddenGroups.has(f.g||0))return;const n=nrm(f.v);if(n.lengthSq()<.5)return;
+  const h=Math.abs(n.y)>.9?new T.Vector3(1,0,0):new T.Vector3(0,1,0),u=h.clone().cross(n).normalize(),w=n.clone().cross(u);
+  const c2=f.v.map(i=>{const p=vec(i);return new T.Vector2(p.dot(u),p.dot(w))});
+  const col=sel.has(fi)?[.42,.66,1]:f.c?new T.Color(f.c).toArray():f.g?[.82,.9,.78]:[.91,.86,.78];
+  T.ShapeUtils.triangulateShape(c2,[]).forEach(t=>{t.forEach(k=>{P.push(...V[f.v[k]]);C.push(...col)});tf.push(fi)})});
+ const gm=new T.BufferGeometry();gm.setAttribute('position',new T.Float32BufferAttribute(P,3));gm.setAttribute('color',new T.Float32BufferAttribute(C,3));gm.computeVertexNormals();
+ mesh=new T.Mesh(gm,new T.MeshLambertMaterial({vertexColors:sty!=3,color:0xffffff,side:T.DoubleSide,transparent:sty==1,opacity:sty==1?.35:1,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1}));mesh.visible=sty!=2;mesh.castShadow=mesh.receiveShadow=true;scene.add(mesh);
+ const cs=getComputedStyle(document.documentElement),L=[];
+ E.forEach(k=>{const[a,b]=pr(k);L.push(...V[a],...V[b])});addO(L,cs.getPropertyValue('--fg').trim());
+ if(learn){const ends=new Set(),N=[];E.forEach(k=>pr(k).forEach(i=>ends.add(i)));addO([...ends].flatMap(i=>V[i]),0xff9500,1);
+  F.forEach(f=>{const n=nrm(f.v),c=new T.Vector3();f.v.forEach(i=>c.add(vec(i)));c.divideScalar(f.v.length);N.push(...c.toArray(),...c.clone().addScaledVector(n,.6).toArray())});addO(N,0xe04848)}
+ ren.setClearColor(cs.getPropertyValue('--bg').trim());hint();dirty=1}
+const pv=new T.LineSegments(new T.BufferGeometry(),new T.LineBasicMaterial({color:0x2f6fed}));scene.add(pv);
+const mkr=new T.Mesh(new T.SphereGeometry(.5,12,8),new T.MeshBasicMaterial({color:0xff9500,depthTest:false}));mkr.visible=false;mkr.renderOrder=9;scene.add(mkr);
+function setPv(a){pv.geometry.dispose();pv.geometry=new T.BufferGeometry();pv.geometry.setAttribute('position',new T.Float32BufferAttribute(a,3));dirty=1}
+function showPk(pk){if(!pk){mkr.visible=false;setPv([]);$('tag').textContent='';return}mkr.visible=true;mkr.position.set(...pk.p);mkr.scale.setScalar(rad*.012);$('tag').textContent=pk.tag||'';dirty=1}
+function ray(e){const r=el.getBoundingClientRect();nd.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);rc.setFromCamera(nd,cam);return rc.ray}
+function hit(e){ray(e);if(!tf.length)return null;const h=rc.intersectObject(mesh)[0];return h?{fi:tf[h.faceIndex],p:h.point}:null}
+function lc(r,p,d){const w=r.origin.clone().sub(p),b=r.direction.dot(d),dv=w.dot(d),e=r.direction.dot(w),den=1-b*b,t=den<1e-6?0:(dv-b*e)/den;return p.clone().addScaledVector(d,t)}
+const ax3=a=>new T.Vector3().setComponent(a,1);
+function pick(e,from,k){const r=ray(e);
+ if(tool=='line'&&axis>=0&&from){const p=lc(r,new T.Vector3(...from),ax3(axis)).toArray();p[axis]=g4(p[axis]);return{p,tag:'Axis '+'XYZ'[axis]}}
+ const ends=new Set();E.forEach(x=>pr(x).forEach(i=>ends.add(i)));
+ const W=el.clientWidth/2,Hh=el.clientHeight/2,sd=a=>{const s=new T.Vector3(...a).project(cam);return Math.hypot((s.x-nd.x)*W,(s.y-nd.y)*Hh)};
+ let bd=18,bp=null,bm=null,tag='';
+ ends.forEach(i=>{const d=sd(V[i]);if(d<bd){bd=d;bp=V[i];tag='Endpoint'}});
+ if(!bp)E.forEach(x=>{const[a,b]=pr(x),m=V[a].map((c,i)=>(c+V[b][i])/2),d=sd(m);if(d<bd){bd=d;bp=m;bm=[a,b];tag='Midpoint'}});
+ if(bp)return{p:[...bp],tag,mid:bm,k:1};
+ if(k!=null&&from){const o=new T.Vector3();if(!r.intersectPlane(new T.Plane(ax3(k),-from[k]),o))return{p:[...from],tag:'',k};return{p:o.toArray().map((c,i)=>i==k?from[k]:g4(c)),tag:'Grid',k}}
+ const h=hit(e);
+ if(h){const n=nrm(F[h.fi].v);let p=h.p.toArray(),kk=1;const a=[0,1,2].find(i=>Math.abs(n.getComponent(i))>.99);if(a!=null){p=p.map((c,i)=>i==a?c:g4(c));kk=a}return{p,tag:'On face',k:kk}}
+ const o=new T.Vector3();if(!r.intersectPlane(new T.Plane(new T.Vector3(0,1,0),0),o))return{p:[0,0,0],tag:'',k:1};
+ return{p:[g4(o.x),0,g4(o.z)],tag:'Grid',k:1}}
+function vIdx(pk){if(pk.mid){const m=V.push(pk.p)-1;splitEdge(pk.mid[0],pk.mid[1],m);return m}return addV(pk.p)}
+function prev(e){
+ if(tool=='line'){const pk=pick(e,last!=null?V[last]:null);showPk(pk);setPv(last!=null?[...V[last],...pk.p]:[])}
+ else if(tool=='tape'){const pk=pick(e);showPk(pk);if(rc1){setPv([...rc1.p,...pk.p]);$('tag').textContent='Distance: '+dd(rc1.p,pk.p).toFixed(3)}}
+ else if(tool=='rect'){const pk=rc1?pick(e,rc1.p,rc1.k):pick(e);if(rc1)pk.p[rc1.k]=rc1.p[rc1.k];showPk(pk);if(rc1){const c=rectC(rc1.p,pk.p,rc1.k);setPv([...c[0],...c[1],...c[1],...c[2],...c[2],...c[3],...c[3],...c[0]])}}}
+function mpt(e,c){const r=ray(e);if(axis>=0)return lc(r,c,ax3(axis));const o=new T.Vector3();return r.intersectPlane(new T.Plane(new T.Vector3(0,1,0),-c.y),o)?o:c.clone()}
+function down(e){moved=0;dr={x:e.clientX,y:e.clientY};
+ if(tool=='orbit'||(e.pointerType=='mouse'&&e.button==2)){dr.m='o';return}
+ if(tool=='line'||tool=='rect'||tool=='tape'){dr.m='p';prev(e);return}
+ if(tool=='select'||tool=='paint'){dr.m='s';return}
+ if(tool=='push'){const h=hit(e);if(!h)return;dr.m='u';dr.fi=h.fi;dr.n=nrm(F[h.fi].v);dr.a=h.p.clone();base=snap();return}
+ if(tool=='offset'){const h=hit(e);if(!h)return;dr.m='f';dr.fi=h.fi;base=snap();return}
+ if(tool=='move'&&sel.size){dr.m='m';base=snap();dr.c=cen();dr.s=mpt(e,dr.c)}}
+function mv(e,dx,dy){if(Math.hypot(e.clientX-dr.x,e.clientY-dr.y)>6)moved=1;const m=dr.m;
+ if(m=='o'){th-=dx*.01;ph=Math.min(3.1,Math.max(.05,ph-dy*.01));dirty=1}
+ else if(m=='p')prev(e);
+ else if(m=='u'&&moved){const t=g4(lc(ray(e),dr.a,dr.n).sub(dr.a).dot(dr.n));load(base);sel=new Set();if(Math.abs(t)>.01)extrude(dr.fi,t);rebuild()}
+ else if(m=='f'&&moved){const d=g4((e.clientX-dr.x)/40);load(base);sel=new Set();if(Math.abs(d)>.01)offs(dr.fi,d);rebuild()}
+ else if(m=='m'&&moved){const d=mpt(e,dr.c).sub(dr.s).toArray().map(g4);load(base);vsel().forEach(i=>V[i]=V[i].map((c,k)=>c+d[k]));rebuild()}}
+function up(e){const m=dr.m;
+ if(m=='u'||m=='m'||m=='f'){if(base){moved?mark(base):load(base)}base=null;if(!moved)rebuild()}
+ else if(m=='p'){
+  if(tool=='line'){const pk=pick(e,last!=null?V[last]:null);mark();const i=vIdx(pk);if(last==null)last=i;else if(i==last)last=null;else{drawEdge(last,i);last=i}rebuild();showPk(null)}
+  else if(tool=='tape'){const pk=pick(e);if(!rc1)rc1={p:pk.p};else{$('tag').textContent='Distance: '+dd(rc1.p,pk.p).toFixed(3);setPv([...rc1.p,...pk.p]);rc1=null}}
+  else{if(!rc1){const pk=pick(e);rc1={p:pk.p,k:pk.k??1}}else{const pk=pick(e,rc1.p,rc1.k);pk.p[rc1.k]=rc1.p[rc1.k];mark();drawRect(rc1.p,pk.p,rc1.k);rc1=null;rebuild();showPk(null)}}}
+ else if(m=='s'&&tool=='paint'&&!moved){const h=hit(e);if(h){mark();F[h.fi].c=cin.value;rebuild()}}
+ else if(m=='s'&&!moved){const h=hit(e);if(!h)sel.clear();else{const g=F[h.fi].g,ids=g?F.map((f,i)=>f.g==g?i:-1).filter(i=>i>=0):[h.fi],on=sel.has(h.fi);ids.forEach(i=>on?sel.delete(i):sel.add(i))}rebuild()}}
+const pm=()=>{const a=[...Ps.values()];return[(a[0][0]+a[1][0])/2,(a[0][1]+a[1][1])/2,Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1])]};
+function two(){const[x,y,d]=pm();if(pg){rad=Math.min(120,Math.max(2,rad*pg[2]/d));const k=rad*.83/el.clientHeight,rt=new T.Vector3(),u=new T.Vector3(),z=new T.Vector3();cam.matrix.extractBasis(rt,u,z);tg.addScaledVector(rt,-(x-pg[0])*k).addScaledVector(u,(y-pg[1])*k);dirty=1}pg=[x,y,d]}
+el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);Ps.set(e.pointerId,[e.clientX,e.clientY]);
+ if(Ps.size>1){if(base){load(base);base=null;rebuild()}dr=null;showPk(null);pg=null;return}down(e)});
+el.addEventListener('pointermove',e=>{
+ if(!Ps.has(e.pointerId)){if(e.pointerType!='touch')prev(e);return}
+ const o=Ps.get(e.pointerId);Ps.set(e.pointerId,[e.clientX,e.clientY]);
+ if(Ps.size>1)two();else if(dr)mv(e,e.clientX-o[0],e.clientY-o[1])});
+el.addEventListener('pointerup',e=>{if(Ps.size==1&&dr)up(e);Ps.delete(e.pointerId);if(Ps.size<2)pg=null;dr=null});
+el.addEventListener('pointercancel',e=>{
+ Ps.delete(e.pointerId);
+ // Roll back temporary geometry if Safari cancels an active touch.
+ if(base){load(base);base=null;rebuild()}
+ dr=null;pg=null;moved=0;showPk(null);
+});
+el.addEventListener('wheel',e=>{e.preventDefault();rad=Math.min(120,Math.max(2,rad*Math.exp(e.deltaY*.001)));dirty=1},{passive:false});
+el.addEventListener('contextmenu',e=>e.preventDefault());
+const mkb=(p,l,f)=>{const b=document.createElement('button');b.textContent=l;b.onclick=f;p.append(b);return b},tbs={};
+[['orbit','Orbit'],['select','Select'],['line','Line'],['rect','Rect'],['push','Push/Pull'],['move','Move'],['offset','Offset'],['tape','Tape'],['paint','Paint']].forEach(([t,l])=>tbs[t]=mkb($('tools'),l,()=>{tool=t;last=null;rc1=null;showPk(null);for(const k in tbs)tbs[k].classList.toggle('on',k==t);hint()}));
+tbs.orbit.classList.add('on');
+const ab=$('acts'),tip=s=>{$('tag').textContent=s;setTimeout(()=>$('tag').textContent='',1500)};
+mkb(ab,'Undo',undo);mkb(ab,'Redo',redo);
+const axb=mkb(ab,'Axis: free',()=>{axis=axis>=2?-1:axis+1;axb.textContent='Axis: '+(axis<0?'free':'XYZ'[axis])});
+mkb(ab,'↺',()=>xf(p=>p.applyAxisAngle(ax3(axis<0?1:axis),Math.PI/12)));
+mkb(ab,'↻',()=>xf(p=>p.applyAxisAngle(ax3(axis<0?1:axis),-Math.PI/12)));
+mkb(ab,'−',()=>xf(p=>p.multiplyScalar(1/1.1)));mkb(ab,'+',()=>xf(p=>p.multiplyScalar(1.1)));
+mkb(ab,'Group',()=>{if(sel.size){mark();dup([...sel],[0,0,0],1);rebuild()}});
+mkb(ab,'Copy',()=>{if(sel.size){mark();const o=[0,0,0];o[axis<0?0:axis]=1;dup([...sel],o,0);rebuild()}});
+mkb(ab,'Delete',()=>{if(sel.size){mark();F=F.filter((_,i)=>!sel.has(i));sel.clear();rebuild()}});
+mkb(ab,'Save',()=>{try{localStorage.setItem('sketchlab',snap());tip('Saved')}catch(e){tip('Save failed')}});
+mkb(ab,'Load',()=>{try{const s=localStorage.getItem('sketchlab');if(s){mark();load(s);sel.clear();rebuild()}else tip('Nothing saved')}catch(e){tip('Load failed')}});
+mkb(ab,'Learn',()=>{learn^=1;rebuild()});
+mkb(ab,'Goal',()=>{learn=1;chal^=1;rebuild()});
+const cin=document.createElement('input');cin.type='color';cin.value='#c0392b';cin.style.cssText='flex:none;width:44px;height:40px;border:1px solid var(--bd);border-radius:10px;padding:2px;background:var(--bar)';$('tools').append(cin);
+const secP=new T.Plane(new T.Vector3(0,-1,0),0);let sec=-1;
+mkb(ab,'Section',()=>{sec=sec>=12?-1:sec+1;if(sec<0)ren.clippingPlanes=[];else{secP.constant=(sec+1)*.5;ren.clippingPlanes=[secP]}tip(sec<0?'Section off':'Section height '+(sec+1)*.5);dirty=1});
+const SC=[];let si=0;
+mkb(ab,'Save view',()=>{SC.push({th,ph,rad,t:tg.clone()});tip('View '+SC.length+' saved')});
+mkb(ab,'Next view',()=>{if(!SC.length)return tip('No saved views');const s=SC[si++%SC.length];th=s.th;ph=s.ph;rad=s.rad;tg.copy(s.t);dirty=1;tip('View '+((si-1)%SC.length+1))});
+const fin=document.createElement('input');fin.type='file';fin.accept='.dxf,.dwg';fin.style.display='none';document.body.append(fin);
+mkb(ab,'Import DXF/DWG',()=>fin.click());
+fin.onchange=()=>{const f=fin.files[0];fin.value='';if(!f)return;
+ if(/\.dwg$/i.test(f.name)){$('hint').textContent='DWG is a closed binary format the browser cannot read. Export it as DXF (AutoCAD, DWG TrueView, or a free converter) and import that file.';return}
+ const r=new FileReader();r.onload=()=>{try{dxfImport(r.result)}catch(e){tip('Import failed')}};r.readAsText(f)};
+mkb(ab,'Shadows',()=>{shad^=1;ren.shadowMap.enabled=!!shad;gnd.visible=!!shad;gnd.material.needsUpdate=true;rebuild()});
+const SUN=[[3,8,5],[-8,6,4],[0,3,-9],[8,2,2]];let sn=0;
+mkb(ab,'Sun',()=>{sn=(sn+1)%SUN.length;dl.position.set(...SUN[sn]);dirty=1;tip('Sun position '+(sn+1))});
+mkb(ab,'Style',()=>{sty=(sty+1)%4;tip(['Shaded','X-ray','Wireframe','Hidden line'][sty]);rebuild()});
+mkb(ab,'Fit',()=>{const b=new T.Box3();E.forEach(k=>pr(k).forEach(i=>b.expandByPoint(vec(i))));if(b.isEmpty())return;b.getCenter(tg);rad=Math.max(4,b.getSize(new T.Vector3()).length()*1.6);dirty=1});
+const SV=[[0,.05],[0,1.5708],[1.5708,1.5708],[.8,1.05]];let sv=0;
+mkb(ab,'View',()=>{sv=(sv+1)%4;th=SV[sv][0];ph=SV[sv][1];tip(['Top','Front','Right','Iso'][sv]);dirty=1});
+mkb(ab,'Array ×3',()=>{if(!sel.size)return;mark();const a=axis<0?0:axis,vs=vsel().map(i=>V[i][a]),w=Math.max(...vs)-Math.min(...vs)||1,ids=[...sel];for(let n=1;n<=3;n++){const o=[0,0,0];o[a]=w*n;dup(ids,o,0)}rebuild()});
+mkb(ab,'Mirror',()=>{const a=axis<0?0:axis;xf(p=>p.setComponent(a,-p.getComponent(a)))});
+// Room generator: floor slab plus four independently editable wall solids.
+function addRoom(){
+ const ask=(label,val)=>{const s=prompt(label+' ('+unitName+')',String(val));if(s===null)return null;const n=Number(s);return Number.isFinite(n)&&n>0?n:null};
+ const w=ask('Room width',5);if(w===null)return;
+ const d=ask('Room depth',4);if(d===null)return;
+ const h=ask('Wall height',3);if(h===null)return;
+ const t=ask('Wall thickness',.15);if(t===null||t*2>=Math.min(w,d))return tip('Wall thickness is too large');
+ mark();const maxX=V.length?Math.max(...V.map(p=>p[0])):0;const x=V.length?maxX+2:0,z=0;
+ makeBox(x,-t,z,w,t,d); // base slab
+ makeBox(x,0,z,w,h,t); makeBox(x,0,z+d-t,w,h,t);
+ makeBox(x,0,z+t,t,h,d-2*t); makeBox(x+w-t,0,z+t,t,h,d-2*t);
+ rebuild();tip('Room created: '+w+' × '+d+' × '+h+' '+unitName);
+}
+function clearModel(){if(!V.length&&!F.length&&!E.size)return;if(!confirm('Clear the current model?'))return;mark();V=[];E=new Set();F=[];sel.clear();last=null;rc1=null;rebuild();tip('Model cleared')}
+
+// Expanded architectural workflow controls.
+mkb(ab,'Box',()=>componentBox('box'));
+mkb(ab,'Wall',()=>componentBox('wall'));
+mkb(ab,'Slab',()=>componentBox('slab'));
+mkb(ab,'Column',addColumn);
+mkb(ab,'Stairs',addStairs);
+mkb(ab,'Gable roof',addGableRoof);
+mkb(ab,'Room',addRoom);
+mkb(ab,'Clear model',clearModel);
+mkb(ab,'Move XYZ',moveSelectedExact);
+mkb(ab,'Snap',()=>{const v=prompt('Snap increment ('+unitName+')',String(snapStep));if(v!==null&&Number(v)>0){snapStep=Number(v);tip('Snap '+snapStep+' '+unitName)}});
+mkb(ab,'Units',()=>{const v=prompt('Model units: m, cm, mm, ft or in',unitName);if(v&&['m','cm','mm','ft','in'].includes(v.trim().toLowerCase())){unitName=v.trim().toLowerCase();tip('Units label: '+unitName+' (existing geometry is not rescaled)')}});
+mkb(ab,'Grid',()=>{gr.visible=!gr.visible;tip('Grid '+(gr.visible?'on':'off'));dirty=1});
+mkb(ab,'Export DXF',exportDXF);
+mkb(ab,'Export Project',exportProject);
+const pj=document.createElement('input');pj.type='file';pj.accept='.json,application/json';pj.style.display='none';document.body.append(pj);
+mkb(ab,'Import Project',()=>pj.click());pj.onchange=()=>{const f=pj.files&&pj.files[0];pj.value='';if(f)importProjectFile(f)};
+
+async function saveFile(name,text){
+ try{
+  const blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=name.replace(/\.txt$/i,'');a.style.display='none';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  tip('Download started');
+ }catch(e){tip('Export failed')}
+}
+mkb(ab,'Export OBJ',()=>{if(!F.length)return tip('Nothing to export');saveFile('sketchlab-model.obj',V.map(p=>'v '+p.join(' ')).join('\n')+'\n'+F.map(f=>'f '+f.v.map(i=>i+1).join(' ')).join('\n'))});
+mkb(ab,'Export STL',()=>{const P=mesh.geometry.attributes.position.array;if(!P.length)return tip('Nothing to export');let s='solid sketchlab\n';for(let i=0;i<P.length;i+=9){const a=new T.Vector3(P[i],P[i+1],P[i+2]),b=new T.Vector3(P[i+3],P[i+4],P[i+5]),c=new T.Vector3(P[i+6],P[i+7],P[i+8]),n=b.clone().sub(a).cross(c.clone().sub(a)).normalize();s+='facet normal '+n.toArray().join(' ')+'\nouter loop\n'+[a,b,c].map(v=>'vertex '+v.toArray().join(' ')).join('\n')+'\nendloop\nendfacet\n'}saveFile('sketchlab-model.stl',s+'endsolid sketchlab')});
+
+
+// ---- Closed-solid Boolean engine (BSP CSG) ----
+// Polygonal BSP union/subtract/intersect. Inputs must be closed, consistently oriented solids.
+const __V=(x)=>x.slice();
+const __add=(a,b)=>a.map((v,i)=>v+b[i]);
+const __sub=(a,b)=>a.map((v,i)=>v-b[i]);
+const __mul=(a,s)=>a.map(v=>v*s);
+const __dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const __cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const __len=a=>Math.sqrt(__dot(a,a));
+const __norm=a=>{const l=__len(a)||1;return __mul(a,1/l)};
+const __EPS=1e-5;
+class __Poly{
+ constructor(v){this.v=v.map(__V);this.plane=this.mkPlane()}
+ mkPlane(){const n=__norm(__cross(__sub(this.v[1],this.v[0]),__sub(this.v[2],this.v[0])));return {n,w:__dot(n,this.v[0])}}
+ flip(){this.v.reverse();this.plane.n=__mul(this.plane.n,-1);this.plane.w=-this.plane.w}
+}
+class __BSP{
+ constructor(p=[]){this.plane=null;this.front=null;this.back=null;this.polys=[];if(p.length)this.build(p)}
+ clone(){const n=new __BSP();n.plane=this.plane?{n:__V(this.plane.n),w:this.plane.w}:null;n.front=this.front&&this.front.clone();n.back=this.back&&this.back.clone();n.polys=this.polys.map(p=>new __Poly(p.v));return n}
+ invert(){this.polys.forEach(p=>p.flip());if(this.plane){this.plane.n=__mul(this.plane.n,-1);this.plane.w=-this.plane.w}if(this.front)this.front.invert();if(this.back)this.back.invert();const t=this.front;this.front=this.back;this.back=t}
+ clipPolys(polys){if(!this.plane)return polys;let f=[],b=[];polys.forEach(p=>this.split(p,this.plane,f,b,f,b));if(this.front)f=this.front.clipPolys(f);if(this.back)b=this.back.clipPolys(b);else b=[];return f.concat(b)}
+ clipTo(b){this.polys=b.clipPolys(this.polys);if(this.front)this.front.clipTo(b);if(this.back)this.back.clipTo(b)}
+ all(){let a=this.polys.slice();if(this.front)a=a.concat(this.front.all());if(this.back)a=a.concat(this.back.all());return a}
+ build(polys){if(!polys.length)return;if(!this.plane)this.plane={n:__V(polys[0].plane.n),w:polys[0].plane.w};let f=[],b=[];polys.forEach(p=>this.split(p,this.plane,this.polys,this.polys,f,b));if(f.length){if(!this.front)this.front=new __BSP();this.front.build(f)}if(b.length){if(!this.back)this.back=new __BSP();this.back.build(b)}}
+ split(p,pl,co,cb,front,back){
+  const COP=0,FR=1,BA=2,SP=3;let typ=0,ts=p.v.map(v=>{const t=__dot(pl.n,v)-pl.w;return t < -__EPS?BA:t>__EPS?FR:COP});ts.forEach(t=>typ|=t);
+  if(typ===COP){(__dot(pl.n,p.plane.n)>0?co:cb).push(p)}
+  else if(typ===FR)front.push(p);else if(typ===BA)back.push(p);
+  else{
+   const f=[],b=[];
+   for(let i=0;i<p.v.length;i++){const j=(i+1)%p.v.length,ti=ts[i],tj=ts[j],vi=p.v[i],vj=p.v[j];if(ti!==BA)f.push(vi);if(ti!==FR)b.push(vi);if((ti|tj)===SP){const d=__sub(vj,vi),den=__dot(pl.n,d);if(Math.abs(den)>1e-12){const t=(pl.w-__dot(pl.n,vi))/den,v=__add(vi,__mul(d,t));f.push(v);b.push(v)}}}
+   if(f.length>=3)front.push(new __Poly(f));if(b.length>=3)back.push(new __Poly(b));
+  }
+ }
+}
+function __boolean(A,B,op){
+ const a=new __BSP(A.map(p=>new __Poly(p))),b=new __BSP(B.map(p=>new __Poly(p)));
+ if(op==='union'){a.clipTo(b);b.clipTo(a);b.invert();b.clipTo(a);b.invert();a.build(b.all());return a.all()}
+ if(op==='subtract'){a.invert();a.clipTo(b);b.clipTo(a);b.invert();b.clipTo(a);b.invert();a.build(b.all());a.invert();return a.all()}
+ a.invert();b.clipTo(a);b.invert();a.clipTo(b);b.clipTo(a);a.build(b.all());a.invert();return a.all()
+}
+function __groupPolys(g){
+ const polys=[];F.filter(f=>(f.g||0)===g).forEach(f=>{const pts=f.v.map(i=>V[i]);if(pts.length>=3)polys.push(pts)});return polys
+}
+function __solidCheck(polys){
+ if(!polys.length)return 'No faces found';
+ const edges=new Map();
+ polys.forEach(p=>p.forEach((v,i)=>{const w=p[(i+1)%p.length],a=v.map(x=>x.toFixed(4)).join(','),b=w.map(x=>x.toFixed(4)).join(','),k=a<b?a+'|'+b:b+'|'+a;edges.set(k,(edges.get(k)||0)+1)}));
+ const open=[...edges.values()].filter(n=>n!==2).length;
+ return open?'Warning: '+open+' boundary/non-manifold edges. Results may be unreliable.':'Closed edge topology detected';
+}
+function __booleanUI(op){
+ const ga=Number(prompt('First solid layer/group ID','21'));if(!Number.isInteger(ga))return;
+ const gb=Number(prompt('Second solid layer/group ID','22'));if(!Number.isInteger(gb)||ga===gb)return;
+ const A=__groupPolys(ga),B=__groupPolys(gb);if(!A.length||!B.length)return tip('Both group IDs must contain faces');
+ const checkA=__solidCheck(A),checkB=__solidCheck(B);
+ if((checkA.startsWith('Warning')||checkB.startsWith('Warning'))&&!confirm(checkA+'\n'+checkB+'\n\nContinue with approximate/unreliable Boolean result?'))return;
+ try{
+  const out=__boolean(A,B,op);if(!out.length)return tip('Boolean result is empty');
+  const g=Number(prompt('Output group ID','23'));if(!Number.isInteger(g))return;
+  mark();F=F.filter(f=>(f.g||0)!==ga&&(f.g||0)!==gb);
+  out.forEach(p=>{const ids=p.map(addV),uniq=[...new Set(ids)];if(uniq.length>=3){const f={v:uniq,g};F.push(f);bdry(f)}});
+  E=new Set();F.forEach(bdry);sel.clear();rebuild();tip('Boolean '+op+' complete: '+out.length+' polygons');
+ }catch(e){console.error(e);tip('Boolean failed: check closed, overlapping solids')}
+}
+function __booleanDemo(){
+ const start=V.length?__maxX()+2:0;mark();
+ makeBox(start,0,0,3,3,3,21,'#87aee8');
+ makeBox(start+1.5,0.5,0.5,2,2,2,22,'#e5a06d');
+ rebuild();tip('CSG test solids created. Try Union / Subtract / Intersect');
+}
+
+// ---- SketchLab Studio expansion pack ----
+window.__sketchHiddenGroups = window.__sketchHiddenGroups || new Set();
+const __layerNames = JSON.parse(localStorage.getItem('sketchlab.layers')||'{"0":"Default","1":"Architecture","2":"Structure","3":"Furniture","4":"Landscape"}');
+let __activeGroup=1;
+function __maxX(){return V.length?Math.max(...V.map(p=>p[0])):0}
+function __maxY(){return V.length?Math.max(...V.map(p=>p[1])):0}
+function __maxZ(){return V.length?Math.max(...V.map(p=>p[2])):0}
+function __askPositive(label,def){const s=prompt(label+' ('+unitName+')',String(def));if(s===null)return null;const n=Number(s);return Number.isFinite(n)&&n>0?n:null}
+function __componentStart(){return {x:V.length?__maxX()+1:0,y:0,z:V.length?__maxZ()+1:0}}
+function __door(){
+ const w=__askPositive('Door width',0.9);if(w===null)return;
+ const h=__askPositive('Door height',2.1);if(h===null)return;
+ const t=__askPositive('Frame thickness',0.08);if(t===null)return;
+ mark();const p=__componentStart(),frame='#d4b58a',leaf='#986b45';
+ makeBox(p.x,0,p.z,t,h,t,__activeGroup,frame);
+ makeBox(p.x+w-t,0,p.z,t,h,t,__activeGroup,frame);
+ makeBox(p.x,h-t,p.z,w,t,t,__activeGroup,frame);
+ makeBox(p.x+t,0,p.z+t*.15,w-2*t,h-t,t*.5,__activeGroup,leaf);
+ rebuild();tip('Door assembly created (frame + leaf)');
+}
+function __window(){
+ const w=__askPositive('Window width',1.5);if(w===null)return;
+ const h=__askPositive('Window height',1.2);if(h===null)return;
+ const sill=__askPositive('Sill height',0.9);if(sill===null)return;
+ const t=__askPositive('Frame thickness',0.07);if(t===null)return;
+ mark();const p=__componentStart(),frame='#eeeeee',glass='#7ec8e3';
+ makeBox(p.x,sill,p.z,t,h,t,__activeGroup,frame);
+ makeBox(p.x+w-t,sill,p.z,t,h,t,__activeGroup,frame);
+ makeBox(p.x,sill+h-t,p.z,w,t,t,__activeGroup,frame);
+ makeBox(p.x,sill,p.z,w,t,t,__activeGroup,frame);
+ makeBox(p.x+t,sill+t,p.z+t*.2,w-2*t,h-2*t,t*.45,__activeGroup,glass);
+ makeBox(p.x+w/2-t*.35,sill+t,p.z+t*.1,t*.7,h-2*t,t*.55,__activeGroup,frame);
+ makeBox(p.x+t,sill+h/2-t*.35,p.z+t*.1,w-2*t,t*.7,t*.55,__activeGroup,frame);
+ rebuild();tip('Window assembly created (frame + glazing)');
+}
+function __furniture(kind){
+ const p=__componentStart();mark();
+ if(kind==='Bed'){makeBox(p.x,0,p.z,2,.25,1.6,3,'#9b8874');makeBox(p.x,0.25,p.z,2,.25,.3,3,'#e8e0d4');}
+ if(kind==='Table'){makeBox(p.x,0.72,p.z,1.4,.08,.8,3,'#9b7048');[[0,0],[1.28,0],[0,.68],[1.28,.68]].forEach(([x,z])=>makeBox(p.x+x,0,p.z+z,.08,.72,.08,3,'#6b5140'));}
+ if(kind==='Sofa'){makeBox(p.x,0,p.z,1.8,.35,.8,3,'#7894a6');makeBox(p.x,.35,p.z+.58,1.8,.55,.22,3,'#7894a6');makeBox(p.x,0,p.z,.18,.75,.8,3,'#617d90');makeBox(p.x+1.62,0,p.z,.18,.75,.8,3,'#617d90');}
+ rebuild();tip(kind+' generated');
+}
+function __floor(){
+ const y=Number(prompt('Floor elevation ('+unitName+')',String(Math.max(0,__maxY()+3))));if(!Number.isFinite(y))return;
+ const w=__askPositive('Floor width',10);if(w===null)return;
+ const d=__askPositive('Floor depth',8);if(d===null)return;
+ const t=__askPositive('Slab thickness',0.2);if(t===null)return;
+ mark();makeBox(V.length?__maxX()+1:0,y-t,V.length?__maxZ()+1:0,w,t,d,2,'#bfc5cc');rebuild();tip('Floor slab created');
+}
+function __stats(){
+ if(!V.length)return tip('Model is empty');
+ const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+ V.forEach(p=>p.forEach((v,i)=>{mn[i]=Math.min(mn[i],v);mx[i]=Math.max(mx[i],v)}));
+ const dims=mx.map((v,i)=>(v-mn[i]).toFixed(2));
+ const groups={};F.forEach(f=>groups[f.g||0]=(groups[f.g||0]||0)+1);
+ alert('SKETCHLAB MODEL REPORT\n\nVertices: '+V.length+'\nEdges: '+E.size+'\nFaces: '+F.length+'\nBounds X × Y × Z: '+dims.join(' × ')+' '+unitName+'\nGroups: '+Object.entries(groups).map(([g,n])=>(__layerNames[g]||('Group '+g))+': '+n+' faces').join('\n'));
+}
+function __layers(){
+ const lines=Object.entries(__layerNames).map(([k,v])=>k+': '+v+(window.__sketchHiddenGroups.has(+k)?' [hidden]':'')).join('\n');
+ const action=prompt('Layer manager\n'+lines+'\n\nType: hide 0 / show 0 / assign 1 / rename 1 New name / active 2','active '+__activeGroup);
+ if(!action)return;const a=action.trim().split(/\s+/),cmd=a.shift(),id=Number(a.shift());
+ if(!Number.isInteger(id)||id<0||id>99)return tip('Invalid layer number');
+ if(cmd==='hide')window.__sketchHiddenGroups.add(id);
+ else if(cmd==='show')window.__sketchHiddenGroups.delete(id);
+ else if(cmd==='active'){__activeGroup=id;tip('Active layer: '+(__layerNames[id]||('Layer '+id)));return}
+ else if(cmd==='rename'){const name=a.join(' ');if(!name)return;__layerNames[id]=name;localStorage.setItem('sketchlab.layers',JSON.stringify(__layerNames))}
+ else if(cmd==='assign'){if(!sel.size)return tip('Select faces first');mark();sel.forEach(fi=>{if(F[fi])F[fi].g=id});sel.clear()}
+ else return tip('Use hide, show, assign, rename or active');
+ localStorage.setItem('sketchlab.layers',JSON.stringify(__layerNames));rebuild();tip('Layer settings updated');
+}
+function __importOBJ(file){
+ const reader=new FileReader();reader.onload=()=>{try{
+  const vs=[],fs=[],lines=String(reader.result).split(/\r?\n/);
+  lines.forEach(line=>{const s=line.trim().split(/\s+/);if(s[0]==='v'&&s.length>=4){const p=s.slice(1,4).map(Number);if(p.every(Number.isFinite))vs.push(p)}
+   else if(s[0]==='f'&&s.length>=4){const ids=s.slice(1).map(t=>{const n=parseInt(t.split('/')[0],10);return n<0?vs.length+n:n-1});if(ids.every(i=>i>=0&&i<vs.length))fs.push(ids)}});
+  if(!vs.length||!fs.length)throw Error('No mesh faces found');
+  mark();const offset=vs.map(p=>addV(p));fs.forEach(ids=>{const f={v:ids.map(i=>offset[i]),g:__activeGroup};F.push(f);bdry(f)});rebuild();tip('OBJ imported: '+fs.length+' faces');
+ }catch(e){tip('OBJ import failed: check the file format')}};reader.readAsText(file);
+}
+function __exportScreenshot(){try{const a=document.createElement('a');a.download='sketchlab-view.png';a.href=ren.domElement.toDataURL('image/png');a.click();tip('Viewport screenshot exported')}catch(e){tip('Screenshot unavailable in this browser')}}
+function __measureReport(){
+ if(!V.length)return tip('Model is empty');
+ const mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity];
+ V.forEach(p=>p.forEach((v,i)=>{mn[i]=Math.min(mn[i],v);mx[i]=Math.max(mx[i],v)}));
+ const rows=[['Overall X',mx[0]-mn[0]],['Overall Y / height',mx[1]-mn[1]],['Overall Z',mx[2]-mn[2]]];
+ const text='Dimension report ('+unitName+')\n'+rows.map(([n,v])=>n+': '+v.toFixed(3)).join('\n');
+ saveFile('sketchlab-dimensions.txt',text);tip(text.replace(/\n/g,' · '));
+}
+function __help(){alert('SKETCHLAB STUDIO QUICK GUIDE\n\nOrbit: drag the canvas. Pinch to zoom; two-finger drag to pan.\nSelect: tap faces. Select faces before using Move, Copy, Delete, Rotate or Mirror.\nLine / Rect: tap points on the grid or model.\nPush/Pull: drag a face to extrude.\nArchitectural generators: Wall, Slab, Column, Stairs, Gable Roof, Room, Door, Window, Floor, Bed, Table, Sofa.\nLayers: rename, hide, show, set active layer, or assign selected faces.\nFiles: JSON project, DXF, OBJ, STL and PNG viewport export.\nDWG: convert DWG to DXF using DWG → DXF, then import DXF. Solid Boolean Union/Subtract/Intersect are available for closed polygon solids using group IDs. CSG Demo creates test solids in groups 21 and 22.');}
+mkb(ab,'Door',__door);
+mkb(ab,'Window',__window);
+mkb(ab,'Floor',__floor);
+mkb(ab,'Bed',()=>__furniture('Bed'));
+mkb(ab,'Table',()=>__furniture('Table'));
+mkb(ab,'Sofa',()=>__furniture('Sofa'));
+mkb(ab,'Layers',__layers);
+mkb(ab,'Model report',__stats);
+mkb(ab,'Dimensions',__measureReport);
+mkb(ab,'Screenshot',__exportScreenshot);
+mkb(ab,'Help',__help);
+const __objInput=document.createElement('input');__objInput.type='file';__objInput.accept='.obj,text/plain';__objInput.style.display='none';document.body.appendChild(__objInput);
+mkb(ab,'Import OBJ',()=>__objInput.click());__objInput.onchange=()=>{const f=__objInput.files&&__objInput.files[0];__objInput.value='';if(f)__importOBJ(f)};
+mkb(ab,'DWG help',()=>alert('Direct DWG parsing is not available in this standalone browser build. For a dependable workflow, convert DWG to DXF with a CAD application or trusted converter, then use Import DXF/DWG. Avoid uploading confidential drawings to an online converter without permission.'));
+
+mkb(ab,'CSG Union',()=>__booleanUI('union'));
+mkb(ab,'CSG Subtract',()=>__booleanUI('subtract'));
+mkb(ab,'CSG Intersect',()=>__booleanUI('intersect'));
+mkb(ab,'CSG Demo',__booleanDemo);
+mkb(ab,'DWG → DXF',()=>{if(confirm('DWG is a proprietary binary format. Open a browser-based DWG-to-DXF conversion page? Do not upload confidential drawings unless you trust the service.'))window.open('https://cloudconvert.com/dwg-to-dxf','_blank','noopener')});
+
+mkb(ab,'Autosave',()=>{try{localStorage.setItem('sketchlab.autosave',projectJSON());tip('Autosave snapshot stored on this device')}catch(e){tip('Browser storage unavailable')}});
+mkb(ab,'Restore autosave',()=>{try{const s=localStorage.getItem('sketchlab.autosave');if(!s)return tip('No autosave snapshot found');const f=new File([s],'sketchlab-autosave.json',{type:'application/json'});importProjectFile(f)}catch(e){tip('Could not restore autosave')}});
+// Restore a previous autosave on request only; no surprise overwrite on startup.
+
+function rs(){const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;ren.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();dirty=1}
+new ResizeObserver(rs).observe(cv);matchMedia('(prefers-color-scheme:dark)').addEventListener('change',rebuild);
+function cam_(){cam.position.set(tg.x+rad*Math.sin(ph)*Math.sin(th),tg.y+rad*Math.cos(ph),tg.z+rad*Math.sin(ph)*Math.cos(th));cam.lookAt(tg);cam.updateMatrix()}
+window.addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;const k=e.key.toLowerCase();if((e.metaKey||e.ctrlKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return}if((e.metaKey||e.ctrlKey)&&k==='y'){e.preventDefault();redo();return}if(k==='delete'||k==='backspace'){if(sel.size){mark();F=F.filter((_,i)=>!sel.has(i));sel.clear();rebuild()}return}const map={o:'orbit',v:'select',l:'line',r:'rect',p:'push',m:'move',t:'tape'};if(map[k]&&tbs[map[k]])tbs[map[k]].click()});
+// Start with a small editable massing example on a fresh session; Clear model removes it.
+if(!V.length&&!F.length){makeBox(-3,0,-2,6,3,4);makeBox(-3,-.2,-2,6,.2,4);}
+try{setInterval(()=>{try{localStorage.setItem('sketchlab.autosave',projectJSON())}catch(e){}},15000)}catch(e){}
+window.addEventListener('beforeunload',()=>{try{localStorage.setItem('sketchlab.autosave',projectJSON())}catch(e){}});
+(function loop(){if(dirty){dirty=0;cam_();ren.render(scene,cam)}requestAnimationFrame(loop)})();
+rs();if(!F.length&&!E.size)makeBox(-2,0,-2,4,3,4,1,'#d8dfe8');rebuild();
+
+
+ }catch(err){
+  const e=document.getElementById('loaderr');e.style.display='block';e.style.background='#fee2e2';e.style.color='#7f1d1d';
+  e.innerHTML='<b>SketchLab failed to start.</b><br><br>'+String(err&&err.message||err)+'<br><br>Reload the page. If this repeats, send this error text.';
+  console.error(err);
+ }
+};
+</script>
+<script>
+(function(){
+ const e=document.getElementById('loaderr');let i=0;
+ const urls=['https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js','https://unpkg.com/three@0.128.0/build/three.min.js'];
+ function next(){
+  if(i>=urls.length){e.style.display='block';e.innerHTML='<b>SketchLab could not download its 3D engine.</b><br><br>Connect to the internet and open this page in Safari or Chrome. The iPad Files quick preview may block scripts. Host this file using free GitHub Pages and open the website link.';return;}
+  const s=document.createElement('script');s.src=urls[i++];s.onload=function(){try{e.style.display='none';window.bootSketchLab();}catch(err){e.style.display='block';e.textContent='Startup error: '+err.message;}};s.onerror=function(){s.remove();next();};document.head.appendChild(s);
+ }
+ next();
+})();
+</script></body></html>
